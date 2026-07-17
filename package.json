@@ -1,0 +1,40 @@
+{
+  "name": "ai-commit",
+  "displayName": "AI Commit",
+  "description": "Generate commit messages with AI",
+  "version": "0.0.1",
+  "publisher": "Pedro Ferreira",
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./"
+  },
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^7.0.2"
+  },
+  "activationEvents": ["onCommand:ai-commit.generate"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ai-commit.generate",
+        "title": "Generate Commit Message",
+        "icon": "$(comment-discussion-sparkle)"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "ai-commit.generate",
+          "when": "scmProvider == git",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "icon": "src/images/icon.png"
+}
