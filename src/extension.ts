@@ -1,12 +1,8 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { execFile } from 'child_process';
 
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
-
-const execAsync = promisify(exec);
 
 const systemPrompt = `
 You are a helpful assistant that generates concise and meaningful commit messages based on the changes in the code.
@@ -37,8 +33,8 @@ export function activate(context: vscode.ExtensionContext) {
     }, async () => {
       const timer = startLoader(repo);
       try {
-        const msg = await callClaude(diff);
-        stopLoader(timer, repo);
+        const msg = await callClaude(diff, repo.rootUri.fsPath);
+        stopLoader(timer);
         repo.inputBox.value = msg;
         console.log(msg);
       }
@@ -46,7 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(`Failed to generate commit message: ${e}`);
       }
       finally {
-        stopLoader(timer, repo);
+        stopLoader(timer);
       }
     });
   });
@@ -55,26 +51,34 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 
-function getInstructions(): string {
+function getInstructions(repoRoot: string): string {
   let result = systemPrompt;
 
-  const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-  const instructionsPath = path.join(workspacePath ?? '', '.vscode', 'commit-message.md');
-  if (fs.existsSync(instructionsPath))
-    result += fs.readFileSync(instructionsPath, 'utf8');
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(repoRoot))?.uri.fsPath;
+  const candidates = [repoRoot, workspaceFolder].filter((p): p is string => !!p);
+
+  for (const dir of candidates) {
+    const instructionsPath = path.join(dir, '.vscode', 'commit-message.md');
+    if (fs.existsSync(instructionsPath)) {
+      result += '\n' + fs.readFileSync(instructionsPath, 'utf8');
+      break;
+    }
+  }
 
   return result;
 }
 
-async function callClaude(diff: string): Promise<string> {
-  const tmp = path.join(os.tmpdir(), 'ai-commit-diff.txt');
-  fs.writeFileSync(tmp, diff);
-
-  const { stdout } = await execAsync(
-    `claude -p --model claude-haiku-4-5 --system-prompt ${JSON.stringify(getInstructions())} "Generate a commit message for this diff. Only the commit message. Nothing else" < ${tmp}`,
-    { encoding: 'utf8' }
-  );
-  return stdout.trim();
+function callClaude(diff: string, repoRoot: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'claude',
+      ['-p', '--model', 'claude-haiku-4-5', '--system-prompt', getInstructions(repoRoot),
+        'Generate a commit message for this diff. Only the commit message. Nothing else'],
+      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout) => err ? reject(err) : resolve(stdout.trim())
+    );
+    child.stdin?.end(diff);
+  });
 }
 
 function startLoader(repo: any): NodeJS.Timeout {
@@ -87,6 +91,6 @@ function startLoader(repo: any): NodeJS.Timeout {
   }, 400);
 }
 
-function stopLoader(timer: NodeJS.Timeout, repo: any): void {
+function stopLoader(timer: NodeJS.Timeout): void {
   clearInterval(timer);
 }
