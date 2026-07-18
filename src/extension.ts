@@ -2,10 +2,22 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
 const execAsync = promisify(exec);
 
+const systemPrompt = `
+You are a helpful assistant that generates concise and meaningful commit messages based on the changes in the code.
+You shall NOT use any markdown formatting other than bullet points
+You shall NOT generate anything other than the commit message
+- Use the present tense ("Add feature" not "Added feature")
+
+One important note: ensure you add 'Co-Authored-By claude <noreply@anthropic.com>' and 'Co-Authored-By sirj0k3r <info.ppf@sapo.pt>' at the end of the commit message\n
+`;
+
 export function activate(context: vscode.ExtensionContext) {
-  vscode.window.showInformationMessage('ai-commit activated!')
   const cmd = vscode.commands.registerCommand('ai-commit.generate', async () => {
     const git = vscode.extensions.getExtension('vscode.git')?.exports.getAPI(1);
     const repo = git?.repositories[0];
@@ -19,11 +31,23 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     await vscode.window.withProgress({
-      location: vscode.ProgressLocation.SourceControl,
-      title: 'Generating commit message...'
+      location: vscode.ProgressLocation.Notification,
+      title: 'Generating commit message...',
+      cancellable: false
     }, async () => {
-      const msg = await callClaude(diff);
-      repo.inputBox.value = msg;
+      const timer = startLoader(repo);
+      try {
+        const msg = await callClaude(diff);
+        stopLoader(timer, repo);
+        repo.inputBox.value = msg;
+        console.log(msg);
+      }
+      catch (e) {
+        vscode.window.showErrorMessage(`Failed to generate commit message: ${e}`);
+      }
+      finally {
+        stopLoader(timer, repo);
+      }
     });
   });
 
@@ -31,11 +55,38 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 
+function getInstructions(): string {
+  let result = systemPrompt;
+
+  const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+  const instructionsPath = path.join(workspacePath ?? '', '.vscode', 'commit-message.md');
+  if (fs.existsSync(instructionsPath))
+    result += fs.readFileSync(instructionsPath, 'utf8');
+
+  return result;
+}
+
 async function callClaude(diff: string): Promise<string> {
-  const trimmed = diff.slice(0, 4000);
+  const tmp = path.join(os.tmpdir(), 'ai-commit-diff.txt');
+  fs.writeFileSync(tmp, diff);
+
   const { stdout } = await execAsync(
-    `echo ${JSON.stringify(trimmed)} | claude -p --model claude-haiku-4-5 "Conventional commit message for this diff. One line only, no explanation and keep it simple. Commit message only"`,
+    `claude -p --model claude-haiku-4-5 --system-prompt ${JSON.stringify(getInstructions())} "Generate a commit message for this diff. Only the commit message. Nothing else" < ${tmp}`,
     { encoding: 'utf8' }
   );
   return stdout.trim();
+}
+
+function startLoader(repo: any): NodeJS.Timeout {
+  const frames = ['.', '..', '...'];
+  let i = 0;
+  repo.inputBox.value = 'Generating commit message' + frames[0];
+  return setInterval(() => {
+    i = (i + 1) % frames.length;
+    repo.inputBox.value = 'Generating commit message' + frames[i];
+  }, 400);
+}
+
+function stopLoader(timer: NodeJS.Timeout, repo: any): void {
+  clearInterval(timer);
 }
