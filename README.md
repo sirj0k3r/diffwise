@@ -19,11 +19,13 @@ If you already use Claude Code in your terminal and don't want GitHub Copilot's 
 
 ## Custom instructions
 
-Drop a `.vscode/commit-message.md` file in your workspace to append extra instructions to the system prompt (e.g. house commit conventions, ticket-reference formats, scope naming). Its contents are appended verbatim after the default prompt on every generation.
+Drop a `.vscode/diffwise/instructions.md` file in your workspace to append extra instructions to the system prompt (e.g. house commit conventions, ticket-reference formats, scope naming). Its contents are appended verbatim after the default prompt on every generation.
 
 ## Notes
 
-- By default, generated messages include a `Co-Authored-By` trailer. Adjust or remove this via `.vscode/commit-message.md` if you don't want it.
+- By default, generated messages include a `Co-Authored-By` trailer. Adjust or remove this via `.vscode/diffwise/instructions.md` if you don't want it.
 - Uses `claude-haiku-4-5` for fast, low-cost generation. Model is currently hardcoded in `src/extension.ts`.
 
 *I and this extension's development are in no way, shape or form directly affiliated with Anthropic or Claude*
+
+Feel free to leave a review or a rating. It helps a lot!

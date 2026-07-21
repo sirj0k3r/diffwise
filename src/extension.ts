@@ -3,6 +3,9 @@ import { execFile } from 'child_process';
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+
+import * as utils from './utils';
 
 const systemPrompt = `
 You are a helpful assistant that generates concise and meaningful commit messages based on the changes in the code.
@@ -31,18 +34,17 @@ export function activate(context: vscode.ExtensionContext) {
       title: 'Generating commit message...',
       cancellable: false
     }, async () => {
-      const timer = startLoader(repo);
+      const timer = utils.Loader.startLoader(repo);
+      let msg = '';
       try {
-        const msg = await callClaude(diff, repo.rootUri.fsPath);
-        stopLoader(timer);
-        repo.inputBox.value = msg;
-        console.log(msg);
+        msg = await callClaude(diff, repo.rootUri.fsPath);
       }
       catch (e) {
         vscode.window.showErrorMessage(`Failed to generate commit message: ${e}`);
       }
       finally {
-        stopLoader(timer);
+        utils.Loader.stopLoader(timer);
+        repo.inputBox.value = msg;
       }
     });
   });
@@ -55,10 +57,12 @@ function getInstructions(repoRoot: string): string {
   let result = systemPrompt;
 
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(repoRoot))?.uri.fsPath;
-  const candidates = [repoRoot, workspaceFolder].filter((p): p is string => !!p);
+  const candidates = [repoRoot, workspaceFolder]
+    .filter((p): p is string => !!p)
+    .map(dir => path.join(dir, '.vscode', 'diffwise', 'instructions.md'));
+  candidates.push(path.join(os.homedir(), '.vscode', 'diffwise', 'instructions.md'));
 
-  for (const dir of candidates) {
-    const instructionsPath = path.join(dir, '.vscode', 'commit-message.md');
+  for (const instructionsPath of candidates) {
     if (fs.existsSync(instructionsPath)) {
       result += '\n' + fs.readFileSync(instructionsPath, 'utf8');
       break;
@@ -79,18 +83,4 @@ function callClaude(diff: string, repoRoot: string): Promise<string> {
     );
     child.stdin?.end(diff);
   });
-}
-
-function startLoader(repo: any): NodeJS.Timeout {
-  const frames = ['.', '..', '...'];
-  let i = 0;
-  repo.inputBox.value = 'Generating commit message' + frames[0];
-  return setInterval(() => {
-    i = (i + 1) % frames.length;
-    repo.inputBox.value = 'Generating commit message' + frames[i];
-  }, 400);
-}
-
-function stopLoader(timer: NodeJS.Timeout): void {
-  clearInterval(timer);
 }

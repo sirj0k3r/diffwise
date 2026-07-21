@@ -2,7 +2,7 @@
   "name": "diffwise",
   "displayName": "Diffwise",
   "description": "Generate commit messages with AI",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "sirj0k3r",
   "main": "./out/extension.js",
   "scripts": {
