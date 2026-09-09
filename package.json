@@ -17,13 +17,17 @@
     "@vscode/vsce": "^3.9.2",
     "typescript": "^7.0.2"
   },
-  "activationEvents": ["onCommand:ai-commit.generate"],
+  "activationEvents": ["onCommand:ai-commit.generate", "onCommand:diffwise.selectModel"],
   "contributes": {
     "commands": [
       {
         "command": "ai-commit.generate",
         "title": "Generate Commit Message",
         "icon": "$(comment-discussion-sparkle)"
+      },
+      {
+        "command": "diffwise.selectModel",
+        "title": "Diffwise: Select Model"
       }
     ],
     "menus": {
@@ -32,8 +36,29 @@
           "command": "ai-commit.generate",
           "when": "scmProvider == git && !diffwise.generating",
           "group": "navigation"
+        },
+        {
+          "command": "diffwise.selectModel",
+          "when": "scmProvider == git",
+          "group": "1_diffwise"
         }
       ]
+    },
+    "configuration": {
+      "title": "Diffwise",
+      "properties": {
+        "diffwise.model": {
+          "type": "string",
+          "enum": ["haiku", "sonnet"],
+          "enumDescriptions": [
+            "Fast, cheap. Good for most diffs.",
+            "Slower, better on large or subtle diffs."
+          ],
+          "default": "haiku",
+          "scope": "resource",
+          "description": "Model alias passed to the Claude CLI."
+        }
+      }
     }
   },
   "icon": "src/images/icon.png",
