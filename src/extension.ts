@@ -76,7 +76,7 @@ function callClaude(diff: string, repoRoot: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       'claude',
-      ['-p', '--model', 'claude-haiku-4-5', '--system-prompt', getInstructions(repoRoot),
+      ['-p', '--model', 'haiku', '--system-prompt', getInstructions(repoRoot),
         'Generate a commit message for this diff. Only the commit message. Nothing else'],
       { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(stdout.trim())

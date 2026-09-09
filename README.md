@@ -8,7 +8,7 @@ If you already use Claude Code in your terminal and don't want GitHub Copilot's 
 
 1. Click the chat-sparkle icon (💬✨) in the Source Control panel title bar (or run **Generate Commit Message** from the Command Palette).
 2. The extension reads your staged diff (or, for new files with no diff, the list of staged paths).
-3. It shells out to the `claude` CLI (`claude -p --model claude-haiku-4-5`) with the diff piped in and a system prompt instructing it to write a concise, present-tense commit message.
+3. It shells out to the `claude` CLI (`claude -p --model haiku`) with the diff piped in and a system prompt instructing it to write a concise, present-tense commit message.
 4. The generated message is written directly into the Source Control input box.
 
 ## Requirements
@@ -24,7 +24,7 @@ Drop a `.vscode/diffwise/instructions.md` file in your workspace to append extra
 ## Notes
 
 - By default, generated messages include a `Co-Authored-By` trailer. Adjust or remove this via `.vscode/diffwise/instructions.md` if you don't want it.
-- Uses `claude-haiku-4-5` for fast, low-cost generation. Model is currently hardcoded in `src/extension.ts`.
+- Uses `haiku` for fast, low-cost generation. Model is currently hardcoded in `src/extension.ts`.
 
 *I and this extension's development are in no way, shape or form directly affiliated with Anthropic or Claude*
 
