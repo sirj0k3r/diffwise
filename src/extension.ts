@@ -17,7 +17,11 @@ One important note: ensure you add 'Co-Authored-By claude <noreply@anthropic.com
 `;
 
 export function activate(context: vscode.ExtensionContext) {
+  let generating = false;
+
   const cmd = vscode.commands.registerCommand('ai-commit.generate', async () => {
+    if (generating) return;
+
     const git = vscode.extensions.getExtension('vscode.git')?.exports.getAPI(1);
     const repo = git?.repositories[0];
     if (!repo) return;
@@ -29,24 +33,35 @@ export function activate(context: vscode.ExtensionContext) {
       diff = `New files:\n${resources}`;
     }
 
-    await vscode.window.withProgress({
-      location: vscode.ProgressLocation.Notification,
-      title: 'Generating commit message...',
-      cancellable: false
-    }, async () => {
-      const timer = utils.Loader.startLoader(repo);
-      let msg = '';
-      try {
-        msg = await callClaude(diff, repo.rootUri.fsPath);
-      }
-      catch (e) {
+    generating = true;
+    await vscode.commands.executeCommand('setContext', 'diffwise.generating', true);
+
+    const previous = repo.inputBox.value;
+    const placeholder = repo.inputBox.placeholder;
+    repo.inputBox.value = '';
+    // Placeholder and enabled can't seem to be changed, but we'll keep the code for intent declaration purposes
+    repo.inputBox.placeholder = 'Generating commit message...';
+    repo.inputBox.enabled = false;
+
+    let msg = previous;
+    try {
+      await utils.withGenerationProgress('Generating commit message...', async token => {
+        msg = await callClaude(diff, repo.rootUri.fsPath, token);
+      });
+    }
+    catch (e) {
+      // Cancelling is a deliberate user action, not a failure worth reporting.
+      if (!(e instanceof vscode.CancellationError)) {
         vscode.window.showErrorMessage(`Failed to generate commit message: ${e}`);
       }
-      finally {
-        utils.Loader.stopLoader(timer);
-        repo.inputBox.value = msg;
-      }
-    });
+    }
+    finally {
+      repo.inputBox.placeholder = placeholder;
+      repo.inputBox.value = msg;
+      repo.inputBox.enabled = true;
+      generating = false;
+      await vscode.commands.executeCommand('setContext', 'diffwise.generating', false);
+    }
   });
 
   context.subscriptions.push(cmd);
@@ -72,7 +87,7 @@ function getInstructions(repoRoot: string): string {
   return result;
 }
 
-function callClaude(diff: string, repoRoot: string): Promise<string> {
+function callClaude(diff: string, repoRoot: string, token: vscode.CancellationToken): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       'claude',
@@ -81,6 +96,11 @@ function callClaude(diff: string, repoRoot: string): Promise<string> {
       { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(stdout.trim())
     );
+    const cancel = token.onCancellationRequested(() => {
+      child.kill();
+      reject(new vscode.CancellationError());
+    });
+    child.on('close', () => cancel.dispose());
     child.stdin?.end(diff);
   });
 }

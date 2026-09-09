@@ -1,15 +1,20 @@
-export class Loader {
-    static startLoader(repo: any): NodeJS.Timeout {
-        const frames = ['.', '..', '...'];
-        let i = 0;
-        repo.inputBox.value = 'Generating commit message' + frames[0];
-        return setInterval(() => {
-            i = (i + 1) % frames.length;
-            repo.inputBox.value = 'Generating commit message' + frames[i];
-        }, 400);
-    }
+import * as vscode from 'vscode';
 
-    static stopLoader(timer: NodeJS.Timeout): void {
-        clearInterval(timer);
-    }
+/**
+ * Runs `task` behind the source control viewlet's progress bar (the same
+ * indicator git uses while it refreshes) plus a cancellable notification.
+ * ProgressLocation.SourceControl supports no cancellation of its own, so the
+ * notification carries the cancel button and the token.
+ */
+export function withGenerationProgress<T>(
+    title: string,
+    task: (token: vscode.CancellationToken) => Promise<T>
+): Thenable<T> {
+    return vscode.window.withProgress(
+        { location: vscode.ProgressLocation.SourceControl },
+        () => vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title, cancellable: true },
+            (_progress, token) => task(token)
+        )
+    );
 }
