@@ -19,6 +19,17 @@ One important note: ensure you add 'Co-Authored-By claude <noreply@anthropic.com
 export function activate(context: vscode.ExtensionContext) {
   let generating = false;
 
+  // Make sure the global instructions folder exists so users can drop an
+  // instructions.md in there without creating the folder tree by hand.
+  // A failure here (read-only home, permissions) must never stop the command
+  // from being registered, so it is logged and swallowed.
+  try {
+    fs.mkdirSync(globalInstructionsDir(), { recursive: true });
+  }
+  catch (e) {
+    console.error(`diffwise: failed to create global instructions folder: ${e}`);
+  }
+
   const cmd = vscode.commands.registerCommand('ai-commit.generate', async () => {
     if (generating) return;
 
@@ -68,20 +79,43 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 
+function globalInstructionsDir(): string {
+  return path.join(os.homedir(), '.vscode', 'diffwise');
+}
+
+/**
+ * Builds the system prompt: the built-in prompt first as the outermost
+ * baseline, then the global instructions, then the project ones. Both blocks
+ * are cumulative - the project block does not replace the global one, it only
+ * takes precedence on conflict, and the wrapper says so explicitly.
+ */
 function getInstructions(repoRoot: string): string {
   let result = systemPrompt;
 
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(repoRoot))?.uri.fsPath;
-  const candidates = [repoRoot, workspaceFolder]
-    .filter((p): p is string => !!p)
+  // Repo root and workspace folder often resolve to the same directory, so
+  // dedupe before reading or the same file gets injected twice.
+  const projectPaths = [...new Set([repoRoot, workspaceFolder].filter((p): p is string => !!p))]
     .map(dir => path.join(dir, '.vscode', 'diffwise', 'instructions.md'));
-  candidates.push(path.join(os.homedir(), '.vscode', 'diffwise', 'instructions.md'));
+  const globalPaths = [path.join(globalInstructionsDir(), 'instructions.md')];
 
-  for (const instructionsPath of candidates) {
-    if (fs.existsSync(instructionsPath)) {
-      result += '\n' + fs.readFileSync(instructionsPath, 'utf8');
-      break;
-    }
+  const read = (paths: string[]) => paths
+    .filter(p => fs.existsSync(p))
+    .map(p => fs.readFileSync(p, 'utf8'))
+    .join('\n');
+
+  const globalText = read(globalPaths);
+  if (globalText) {
+    result += '\n<global instructions - baseline, may be overridden>\n'
+      + globalText
+      + '\n</global instructions>\n';
+  }
+
+  const projectText = read(projectPaths);
+  if (projectText) {
+    result += '\n<project instructions - AUTHORITATIVE, override the global instructions on any conflict>\n'
+      + projectText
+      + '\n</project instructions>\n';
   }
 
   return result;
