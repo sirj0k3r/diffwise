@@ -30,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
     console.error(`diffwise: failed to create global instructions folder: ${e}`);
   }
 
-  const cmd = vscode.commands.registerCommand('ai-commit.generate', async () => {
+  const cmd = vscode.commands.registerCommand('diffwise.generate', async () => {
     if (generating) return;
 
     const git = vscode.extensions.getExtension('vscode.git')?.exports.getAPI(1);
@@ -63,7 +63,8 @@ export function activate(context: vscode.ExtensionContext) {
     catch (e) {
       // Cancelling is a deliberate user action, not a failure worth reporting.
       if (!(e instanceof vscode.CancellationError)) {
-        vscode.window.showErrorMessage(`Failed to generate commit message: ${e}`);
+        const reason = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`Failed to generate commit message: ${reason}`);
       }
     }
     finally {
@@ -143,6 +144,35 @@ function getInstructions(repoRoot: string): string {
   return result;
 }
 
+/** First sentence of `text`, period included, or the whole thing if it has none. */
+function firstSentence(text: string | undefined): string {
+  const trimmed = (text || '').trim();
+  const end = trimmed.indexOf('.');
+  return end === -1 ? trimmed : trimmed.slice(0, end + 1);
+}
+
+/**
+ * Turns an execFile failure into something readable: the CLI's own output when
+ * it said anything, otherwise a short description of how the process ended.
+ * Never includes the spawned argv, which holds the entire system prompt.
+ */
+function claudeError(err: any, stdout: string, stderr: string): string {
+  // claude prints the short user-facing reason on stdout and its longer
+  // diagnostics on stderr, so lead with stdout. Only the first sentence goes
+  // in the notification - the rest is paragraphs of remediation advice.
+  const output = firstSentence([stdout, stderr]
+    .map(s => (s || '').trim())
+    .find(Boolean));
+
+  const status = err.code === 'ENOENT'
+    ? "'claude' CLI not found on PATH"
+    : err.signal ? `claude terminated by ${err.signal}`
+    : typeof err.code === 'number' ? `claude exited with code ${err.code}`
+    : 'claude failed';
+
+  return output ? `${status}\n${output}` : status;
+}
+
 function callClaude(diff: string, repoRoot: string, token: vscode.CancellationToken): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
@@ -150,7 +180,14 @@ function callClaude(diff: string, repoRoot: string, token: vscode.CancellationTo
       ['-p', '--model', utils.getModel(repoRoot), '--no-session-persistence', '--system-prompt', getInstructions(repoRoot),
         'Generate a commit message for this diff. Only the commit message. Nothing else'],
       { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout) => err ? reject(err) : resolve(stdout.trim())
+      (err, stdout, stderr) => {
+        if (!err) return resolve(stdout.trim());
+        // err.message is "Command failed: <argv>", and the argv carries the
+        // whole system prompt, so it buries the reason the CLI actually gave.
+        // Prefer what claude wrote to stderr/stdout and keep only the exit
+        // status from the error itself.
+        reject(new Error(claudeError(err, stdout, stderr)));
+      }
     );
     const cancel = token.onCancellationRequested(() => {
       child.kill();

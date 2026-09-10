@@ -2,11 +2,12 @@
   "name": "diffwise",
   "displayName": "Diffwise",
   "description": "Generate commit messages with AI",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "sirj0k3r",
   "main": "./out/extension.js",
   "scripts": {
-    "compile": "tsc -p ./"
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
   },
   "engines": {
     "vscode": "^1.125.0"
@@ -17,11 +18,11 @@
     "@vscode/vsce": "^3.9.2",
     "typescript": "^7.0.2"
   },
-  "activationEvents": ["onCommand:ai-commit.generate", "onCommand:diffwise.selectModel"],
+  "activationEvents": ["onCommand:diffwise.generate", "onCommand:diffwise.selectModel"],
   "contributes": {
     "commands": [
       {
-        "command": "ai-commit.generate",
+        "command": "diffwise.generate",
         "title": "Generate Commit Message",
         "icon": "$(comment-discussion-sparkle)"
       },
@@ -33,7 +34,7 @@
     "menus": {
       "scm/title": [
         {
-          "command": "ai-commit.generate",
+          "command": "diffwise.generate",
           "when": "scmProvider == git && !diffwise.generating",
           "group": "navigation"
         },
