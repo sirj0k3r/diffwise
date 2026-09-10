@@ -23,7 +23,7 @@
     "commands": [
       {
         "command": "diffwise.generate",
-        "title": "Generate Commit Message",
+        "title": "Diffwise: Generate Commit Message",
         "icon": "$(comment-discussion-sparkle)"
       },
       {
