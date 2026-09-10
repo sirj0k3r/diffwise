@@ -1,0 +1,68 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two publishes at once; let a newer main commit win.
+concurrency:
+  group: publish-marketplace
+  cancel-in-progress: false
+
+permissions:
+  contents: write # needed only for the GitHub Release step
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read version from package.json
+        id: meta
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package
+        run: npx vsce package --skip-license --out "diffwise-${{ steps.meta.outputs.version }}.vsix"
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx vsce publish \
+            --skip-license \
+            --skip-duplicate \
+            --packagePath "diffwise-${{ steps.meta.outputs.version }}.vsix"
+
+      # Optional: also publish to Open VSX (Cursor, VSCodium, Windsurf).
+      # - name: Publish to Open VSX
+      #   env:
+      #     OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      #   run: npx ovsx publish "diffwise-${{ steps.meta.outputs.version }}.vsix" --pat "$OVSX_PAT"
+
+      - name: Create GitHub Release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.meta.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists, skipping."
+          else
+            gh release create "$tag" \
+              --title "$tag" \
+              --generate-notes \
+              "diffwise-${{ steps.meta.outputs.version }}.vsix"
+          fi

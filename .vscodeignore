@@ -1,0 +1,12 @@
+.vscode/**
+.github/**
+.claude/**
+src/**/*.ts
+!src/images/**
+node_modules/**
+out/**/*.map
+tsconfig.json
+package-lock.json
+*.vsix
+.gitignore
+.DS_Store
