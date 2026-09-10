@@ -64,7 +64,29 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  context.subscriptions.push(cmd);
+  const selectModel = vscode.commands.registerCommand('diffwise.selectModel', async () => {
+    // Scope the "current" marker to the repo in view, since the setting is per resource.
+    const git = vscode.extensions.getExtension('vscode.git')?.exports.getAPI(1);
+    const repoRoot = git?.repositories[0]?.rootUri.fsPath;
+    const current = repoRoot ? utils.getModel(repoRoot) : utils.defaultModel;
+
+    const picked = await vscode.window.showQuickPick(
+      utils.models.map(model => ({
+        label: model.id,
+        detail: model.detail,
+        description: model.id === current ? 'current' : undefined
+      })),
+      { placeHolder: 'Model used to generate commit messages' }
+    );
+    if (!picked) return;
+
+    // Global: the choice follows the user between repos. A workspace that wants
+    // something else can still override it in its own settings.json.
+    await vscode.workspace.getConfiguration('diffwise')
+      .update('model', picked.label, vscode.ConfigurationTarget.Global);
+  });
+
+  context.subscriptions.push(cmd, selectModel);
 }
 
 
@@ -91,7 +113,7 @@ function callClaude(diff: string, repoRoot: string, token: vscode.CancellationTo
   return new Promise((resolve, reject) => {
     const child = execFile(
       'claude',
-      ['-p', '--model', 'haiku', '--no-session-persistence', '--system-prompt', getInstructions(repoRoot),
+      ['-p', '--model', utils.getModel(repoRoot), '--no-session-persistence', '--system-prompt', getInstructions(repoRoot),
         'Generate a commit message for this diff. Only the commit message. Nothing else'],
       { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(stdout.trim())
