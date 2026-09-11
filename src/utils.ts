@@ -1,6 +1,10 @@
 import { execFile } from 'child_process';
 import * as vscode from 'vscode';
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
 /**
  * The model aliases we accept. Aliases rather than dated model ids on purpose:
  * an alias keeps working across Claude CLI upgrades, a dated id does not.
@@ -55,10 +59,20 @@ export type AuthState = 'ok' | 'logged-out' | 'missing';
  * PATH also fails the status call, and offering it a sign-in button would send
  * the user to a terminal that cannot run the login command either.
  */
-export function checkAuth(): Promise<AuthState> {
+export async function checkAuth(): Promise<AuthState> {
+    const state = await probeAuth(claudePath());
+    if (state !== 'missing') return state;
+
+    // Same recovery the generation call gets: the binary may be installed but
+    // out of reach of the PATH the extension host was launched with.
+    const recovered = recoverFromEnoent();
+    return recovered ? probeAuth(recovered) : 'missing';
+}
+
+function probeAuth(bin: string): Promise<AuthState> {
     return new Promise(resolve => {
-        execFile('claude', ['auth', 'status', '--json'], { encoding: 'utf8' }, (err, stdout) => {
-            if (err) return resolve((err as any).code === 'ENOENT' ? 'missing' : 'logged-out');
+        execFile(bin, ['auth', 'status', '--json'], { encoding: 'utf8' }, (err, stdout) => {
+            if (err) return resolve(isNotFound(err) ? 'missing' : 'logged-out');
             try {
                 return resolve(JSON.parse(stdout).loggedIn ? 'ok' : 'logged-out');
             }
@@ -86,11 +100,99 @@ export function startSignIn(onSignedIn: () => void): void {
 
     const term = vscode.window.createTerminal(loginTerminalName);
     term.show();
-    term.sendText('claude auth login');
+    term.sendText(`${shellQuote(claudePath())} auth login`);
 
     const sub = vscode.window.onDidCloseTerminal(async closed => {
         if (closed !== term) return;
         sub.dispose();
         if (await checkAuth() === 'ok') onSignedIn();
     });
+}
+
+/**
+ * True for the one failure worth retrying: the process never started, so no
+ * request was made and nothing was charged. Every other failure came from the
+ * CLI itself and a second attempt would only repeat it.
+ */
+export function isNotFound(err: unknown): boolean {
+    return (err as any)?.code === 'ENOENT';
+}
+
+/** The configured override, or undefined when the setting is blank. */
+function configuredPath(): string | undefined {
+    // Machine scope (see package.json): a workspace must not be able to decide
+    // which executable we run.
+    return vscode.workspace.getConfiguration('diffwise').get<string>('claudePath')?.trim() || undefined;
+}
+
+/**
+ * Where the CLI usually ends up. Only consulted after a spawn failed, and only
+ * because a VS Code started from the dock or Start menu never sees the PATH the
+ * user's shell would have given it.
+ */
+function installLocations(): string[] {
+    const home = os.homedir();
+    return [
+        path.join(home, '.claude', 'local', 'claude'),
+        path.join(home, '.local', 'bin', 'claude'),
+        '/opt/homebrew/bin/claude',
+        '/usr/local/bin/claude',
+        path.join(home, '.bun', 'bin', 'claude'),
+        path.join(home, '.volta', 'bin', 'claude')
+    ];
+}
+
+let discovered: string | undefined;
+
+/** Forgets a discovered path, so a changed setting takes effect immediately. */
+export function resetClaudePath(): void {
+    discovered = undefined;
+}
+
+/**
+ * What to spawn. The setting wins whenever it is set - someone who filled it in
+ * meant it, including to pick between two installs - then anything an earlier
+ * recovery found, then plain PATH lookup.
+ */
+export function claudePath(): string {
+    return configuredPath() ?? discovered ?? 'claude';
+}
+
+/**
+ * Called after a spawn failed with ENOENT. Returns the first install location
+ * that holds an executable, remembered for the rest of the session; undefined
+ * means the user has to point at it themselves.
+ */
+export function recoverFromEnoent(): string | undefined {
+    if (discovered) return discovered;
+    // A configured path that does not resolve is a typo, not something to guess
+    // past: silently running some other binary would hide the mistake.
+    if (configuredPath()) return undefined;
+
+    return discovered = installLocations().find(candidate => {
+        // X_OK rather than existsSync: a path we cannot execute is no better
+        // than a missing one, and skipping it keeps the search going.
+        try {
+            fs.accessSync(candidate, fs.constants.X_OK);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    });
+}
+
+/**
+ * Quotes a path for the terminal's shell. Only needed for the sign-in flow,
+ * which has to go through a shell to be interactive - every other call spawns
+ * the binary directly and needs no quoting at all.
+ */
+function shellQuote(bin: string): string {
+    if (/^[\w./-]+$/.test(bin)) return bin;
+
+    // PowerShell treats a quoted string as a value, so a quoted path needs the
+    // call operator to be run rather than echoed.
+    return process.platform === 'win32'
+        ? `& "${bin}"`
+        : `'${bin.replace(/'/g, `'\\''`)}'`;
 }

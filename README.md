@@ -13,8 +13,9 @@ If you already use Claude Code in your terminal and don't want GitHub Copilot's 
 
 ## Requirements
 
-- [Claude Code CLI](https://claude.com/claude-code) installed and available on your `PATH` as `claude`.
-- The CLI must be authenticated (`claude` should already work from your terminal).
+- [Claude Code CLI](https://claude.com/claude-code) installed and signed in (`claude auth login`).
+  Diffwise looks for it on your `PATH`, then in the usual install locations. If it still cannot find it,
+  the error offers **Locate claude...** to point at it once, which is stored in `diffwise.claudePath`.
 - Git source control must be active in the workspace (uses VS Code's built-in `vscode.git` extension).
 
 ## Custom instructions
@@ -36,6 +37,12 @@ Run **Diffwise: Select Model** from the Command Palette (or the Source Control p
 - `sonnet` — slower, better on large or subtle diffs.
 
 The setting is `scope: resource`, so a workspace can override the global choice per repository.
+
+### Claude CLI location
+
+`diffwise.claudePath` overrides which executable is run. Leave it empty unless Diffwise reports the CLI
+as missing, or you have more than one install and want to pin one. The setting is `scope: machine`, so a
+workspace cannot decide which binary runs on your behalf.
 
 ## Notes
 

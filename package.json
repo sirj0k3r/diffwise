@@ -58,6 +58,12 @@
           "default": "haiku",
           "scope": "resource",
           "description": "Model alias passed to the Claude CLI."
+        },
+        "diffwise.claudePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Absolute path to the `claude` executable. Leave empty to find it on `PATH`; set it only when Diffwise reports the CLI as missing, or to pick between installs."
         }
       }
     }

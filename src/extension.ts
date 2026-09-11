@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
     let msg = previous;
     try {
       await utils.withGenerationProgress('Generating commit message...', async token => {
-        msg = await callClaude(diff, repo.rootUri.fsPath, token);
+        msg = await generate(diff, repo.rootUri.fsPath, token);
       });
     }
     catch (e) {
@@ -100,9 +100,30 @@ export function activate(context: vscode.ExtensionContext) {
       .update('model', picked.label, vscode.ConfigurationTarget.Global);
   });
 
-  context.subscriptions.push(cmd, selectModel);
+  // A changed path must not lose to something an earlier recovery guessed.
+  const onConfigChange = vscode.workspace.onDidChangeConfiguration(e => {
+    if (e.affectsConfiguration('diffwise.claudePath')) utils.resetClaudePath();
+  });
+
+  context.subscriptions.push(cmd, selectModel, onConfigChange);
 }
 
+
+/**
+ * Runs the CLI, retrying once at a recovered path when the first attempt never
+ * managed to start it. The retry is free: ENOENT means no process ran, so no
+ * request was sent and nothing was charged.
+ */
+async function generate(diff: string, repoRoot: string, token: vscode.CancellationToken): Promise<string> {
+  try {
+    return await callClaude(utils.claudePath(), diff, repoRoot, token);
+  }
+  catch (e) {
+    const recovered = utils.isNotFound(e) ? utils.recoverFromEnoent() : undefined;
+    if (!recovered) throw e;
+    return callClaude(recovered, diff, repoRoot, token);
+  }
+}
 
 /**
  * Reports a failed generation. When the CLI turns out to be signed out, the
@@ -110,9 +131,12 @@ export function activate(context: vscode.ExtensionContext) {
  * this path, so a working setup never pays for the extra process.
  */
 async function reportFailure(reason: string): Promise<void> {
-  if (await utils.checkAuth() !== 'logged-out') {
-    // 'missing' lands here too: its own message already says the CLI is not on
-    // PATH, which is the actual problem and is not fixed by signing in.
+  const state = await utils.checkAuth();
+
+  // Not found anywhere we know to look, so the only thing left is to ask.
+  if (state === 'missing') return offerLocate(reason);
+
+  if (state === 'ok') {
     vscode.window.showErrorMessage(`Failed to generate commit message: ${reason}`);
     return;
   }
@@ -126,6 +150,35 @@ async function reportFailure(reason: string): Promise<void> {
       'Diffwise: Claude CLI signed in.', 'Generate commit message');
     if (retry) vscode.commands.executeCommand('diffwise.generate');
   });
+}
+
+/**
+ * Last resort when neither PATH nor the known install locations turned up the
+ * CLI: let the user point at it, and remember where it was so this is asked
+ * exactly once.
+ */
+async function offerLocate(reason: string): Promise<void> {
+  const locate = 'Locate claude...';
+  const pick = await vscode.window.showErrorMessage(
+    `Failed to generate commit message: ${reason}`, locate);
+  if (pick !== locate) return;
+
+  const picked = await vscode.window.showOpenDialog({
+    title: 'Select the claude executable',
+    openLabel: 'Use this claude',
+    canSelectMany: false,
+    defaultUri: vscode.Uri.file(os.homedir())
+  });
+  if (!picked?.length) return;
+
+  // Global rather than workspace: the setting is machine scoped, so a workspace
+  // value would be ignored anyway.
+  await vscode.workspace.getConfiguration('diffwise')
+    .update('claudePath', picked[0].fsPath, vscode.ConfigurationTarget.Global);
+
+  const retry = await vscode.window.showInformationMessage(
+    'Diffwise: Claude CLI location saved.', 'Generate commit message');
+  if (retry) vscode.commands.executeCommand('diffwise.generate');
 }
 
 function globalInstructionsDir(): string {
@@ -199,10 +252,10 @@ function claudeError(err: any, stdout: string, stderr: string): string {
   return output ? `${status}\n${output}` : status;
 }
 
-function callClaude(diff: string, repoRoot: string, token: vscode.CancellationToken): Promise<string> {
+function callClaude(bin: string, diff: string, repoRoot: string, token: vscode.CancellationToken): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
-      'claude',
+      bin,
       ['-p', '--model', utils.getModel(repoRoot), '--no-session-persistence', '--system-prompt', getInstructions(repoRoot),
         'Generate a commit message for this diff. Only the commit message. Nothing else'],
       { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
@@ -212,7 +265,11 @@ function callClaude(diff: string, repoRoot: string, token: vscode.CancellationTo
         // whole system prompt, so it buries the reason the CLI actually gave.
         // Prefer what claude wrote to stderr/stdout and keep only the exit
         // status from the error itself.
-        reject(new Error(claudeError(err, stdout, stderr)));
+        const failure = new Error(claudeError(err, stdout, stderr));
+        // Carry the spawn code across the rewrap so the caller can still tell
+        // "never started" apart from "ran and failed".
+        (failure as any).code = err.code;
+        reject(failure);
       }
     );
     const cancel = token.onCancellationRequested(() => {
