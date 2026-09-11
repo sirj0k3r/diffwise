@@ -1,3 +1,4 @@
+import { execFile } from 'child_process';
 import * as vscode from 'vscode';
 
 /**
@@ -42,4 +43,54 @@ export function withGenerationProgress<T>(
             (_progress, token) => task(token)
         )
     );
+}
+
+/** What a `claude auth status` probe can tell us about the CLI. */
+export type AuthState = 'ok' | 'logged-out' | 'missing';
+
+/**
+ * Probes the CLI's sign-in state. This spawns a second `claude` process, so it
+ * is meant to run after a failure rather than before every generation.
+ * 'missing' and 'logged-out' are kept apart on purpose: a CLI that is not on
+ * PATH also fails the status call, and offering it a sign-in button would send
+ * the user to a terminal that cannot run the login command either.
+ */
+export function checkAuth(): Promise<AuthState> {
+    return new Promise(resolve => {
+        execFile('claude', ['auth', 'status', '--json'], { encoding: 'utf8' }, (err, stdout) => {
+            if (err) return resolve((err as any).code === 'ENOENT' ? 'missing' : 'logged-out');
+            try {
+                return resolve(JSON.parse(stdout).loggedIn ? 'ok' : 'logged-out');
+            }
+            catch {
+                // Unparseable output from a zero exit: assume the CLI is fine and
+                // let the real call report whatever is actually wrong with it.
+                return resolve('ok');
+            }
+        });
+    });
+}
+
+const loginTerminalName = 'Claude login';
+
+/**
+ * Opens a terminal running `claude auth login`. The flow is interactive (it
+ * opens a browser and waits for a paste-back), so the terminal is the only
+ * place it can run - but we watch for it closing and call `onSignedIn` once the
+ * probe agrees, so the user does not have to find the button again afterwards.
+ */
+export function startSignIn(onSignedIn: () => void): void {
+    // A leftover terminal from an abandoned attempt still has a prompt waiting
+    // for input, so replace it instead of typing a second command into it.
+    vscode.window.terminals.find(t => t.name === loginTerminalName)?.dispose();
+
+    const term = vscode.window.createTerminal(loginTerminalName);
+    term.show();
+    term.sendText('claude auth login');
+
+    const sub = vscode.window.onDidCloseTerminal(async closed => {
+        if (closed !== term) return;
+        sub.dispose();
+        if (await checkAuth() === 'ok') onSignedIn();
+    });
 }

@@ -64,7 +64,9 @@ export function activate(context: vscode.ExtensionContext) {
       // Cancelling is a deliberate user action, not a failure worth reporting.
       if (!(e instanceof vscode.CancellationError)) {
         const reason = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Failed to generate commit message: ${reason}`);
+        // Not awaited: the finally below restores the input box, and it should
+        // not wait on a notification the user may never click.
+        void reportFailure(reason);
       }
     }
     finally {
@@ -101,6 +103,30 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(cmd, selectModel);
 }
 
+
+/**
+ * Reports a failed generation. When the CLI turns out to be signed out, the
+ * message becomes actionable instead of a dead end. The auth probe only runs on
+ * this path, so a working setup never pays for the extra process.
+ */
+async function reportFailure(reason: string): Promise<void> {
+  if (await utils.checkAuth() !== 'logged-out') {
+    // 'missing' lands here too: its own message already says the CLI is not on
+    // PATH, which is the actual problem and is not fixed by signing in.
+    vscode.window.showErrorMessage(`Failed to generate commit message: ${reason}`);
+    return;
+  }
+
+  const pick = await vscode.window.showErrorMessage(
+    'Diffwise: the Claude CLI is not signed in.', 'Sign in');
+  if (pick !== 'Sign in') return;
+
+  utils.startSignIn(async () => {
+    const retry = await vscode.window.showInformationMessage(
+      'Diffwise: Claude CLI signed in.', 'Generate commit message');
+    if (retry) vscode.commands.executeCommand('diffwise.generate');
+  });
+}
 
 function globalInstructionsDir(): string {
   return path.join(os.homedir(), '.vscode', 'diffwise');
