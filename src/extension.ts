@@ -11,6 +11,7 @@ const systemPrompt = `
 You are a helpful assistant that generates concise and meaningful commit messages based on the changes in the code.
 You shall NOT use any markdown formatting other than bullet points
 You shall NOT generate anything other than the commit message
+You shall output raw plain text. NEVER wrap the commit message in a markdown code block or backticks
 - Use the present tense ("Add feature" not "Added feature")
 
 One important note: ensure you add 'Co-Authored-By claude <noreply@anthropic.com>' and 'Co-Authored-By sirj0k3r <info.ppf@sapo.pt>' at the end of the commit message\n
